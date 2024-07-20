@@ -97,17 +97,29 @@ class FEMExternalOperator(ufl.ExternalOperator):
 
 
 def evaluate_operands(
-    external_operators: List[FEMExternalOperator], entity_maps: dict[_mesh.Mesh, np.ndarray] | None = None
+    external_operators: List[FEMExternalOperator],
+    entity_maps: Optional[dict[_mesh.Mesh, np.ndarray]] = None,
+    function_space: Optional[fem.function.FunctionSpace] = None,
 ) -> Dict[Union[ufl.core.expr.Expr, int], np.ndarray]:
     """Evaluates operands of external operators.
 
     Args:
-        external_operators: A list with external operators required to be updated.
+        external_operators: A list with FEMExternalOperator-s required to be
+        updated.
+        entity_maps: A dictionary mapping between sub-mesh and parent
+        mesh entities.
+        function_space: The function space to evaluate the
+        operands. If it's `None`, the function space of the original external
+        operator is used.
 
     Returns:
-        A map between UFL operand and the `ndarray`, the evaluation of the operand.
+        A map between UFL operand and the `ndarray`, the evaluation of the
+        operand.
     """
     ref_function_space = external_operators[0].ref_function_space
+    if function_space is None:
+        function_space = ref_function_space
+    operands_function_space = function_space
     ufl_element = ref_function_space.ufl_element()
     mesh = ref_function_space.mesh
     quadrature_points = basix.make_quadrature(ufl_element.cell_type, ufl_element.degree)[0]
@@ -124,15 +136,15 @@ def evaluate_operands(
                 evaluated_operands[operand]
             except KeyError:
                 # Check if we have a sub-mesh with different codim
-                codim = operand.function_space.mesh.topology.dim - mesh.topology.dim
+                codim = operands_function_space.mesh.topology.dim - mesh.topology.dim
                 expr = fem.Expression(operand, quadrature_points)
                 # NOTE: Using expression eval might be expensive
                 if codim == 0:
-                    if operand.function_space.mesh != mesh:
+                    if operands_function_space.mesh != mesh:
                         inverted_map = np.empty(len(cells), dtype=np.int32)
                         indices = np.flatnonzero(entity_maps[mesh] >= 0)
                         inverted_map[entity_maps[mesh][indices]] = indices
-                        evaluated_operand = expr.eval(operand.function_space.mesh, inverted_map)
+                        evaluated_operand = expr.eval(operands_function_space.mesh, inverted_map)
                     else:
                         evaluated_operand = expr.eval(mesh, cells)
                 elif codim == 1:
@@ -143,11 +155,11 @@ def evaluate_operands(
                     inverted_map[entity_maps[mesh][indices]] = indices
                     integration_entities = cpp.fem.compute_integration_domains(
                         fem.IntegralType.exterior_facet,
-                        operand.function_space.mesh.topology,
+                        operands_function_space.mesh.topology,
                         inverted_map,
-                        operand.function_space.mesh.topology.dim - 1,
+                        operands_function_space.mesh.topology.dim - 1,
                     )
-                    evaluated_operand = expr.eval(operand.function_space.mesh, integration_entities)
+                    evaluated_operand = expr.eval(operands_function_space.mesh, integration_entities)
                 else:
                     raise NotImplementedError("Only codim 0 and 1 are supported.")
             evaluated_operands[operand] = evaluated_operand
