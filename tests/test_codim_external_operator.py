@@ -36,13 +36,13 @@ def g_external(derivatives):
         return NotImplementedError
 
 
-def f_impl(uuh):
-    output = uuh**3  # NUMPY
+def f_impl(uuh_square):
+    output = uuh_square * np.sqrt(uuh_square)  # NUMPY
     return output.reshape(-1)  # The output must be returned flattened to one dimension
 
 
-def dfdu_impl(uuh):
-    aa = 3 * uuh**2  # NUMPY
+def dfdu_impl(uuh_square):
+    aa = 3 * uuh_square  # NUMPY
     return aa.reshape(-1)  # The output must be returned flattened to one dimension
 
 
@@ -137,7 +137,7 @@ def test_external_operator_codim_0(quadrature_degree):
     Qe = basix.ufl.quadrature_element(submesh.basix_cell(), degree=quadrature_degree, value_shape=())
     Q = dolfinx.fem.functionspace(submesh, Qe)
 
-    f = FEMExternalOperator(u, function_space=Q, external_function=f_external)  # g is now Symbolic not numpy involved
+    f = FEMExternalOperator(u*u, function_space=Q, external_function=f_external)  # g is now Symbolic not numpy involved
 
     dx = ufl.Measure(
         "dx", domain=mesh, subdomain_data=ct, subdomain_id=1, metadata={"quadrature_degree": quadrature_degree}
@@ -150,10 +150,11 @@ def test_external_operator_codim_0(quadrature_degree):
             J = ufl.algorithms.expand_derivatives(ufl.derivative(f, u) * dx)
 
         J_replaced, J_external_operators = replace_external_operators(J)
-        J_compiled = dolfinx.fem.form(J_replaced, entity_maps=entity_maps)
         # Pack coefficients for g
         evaluated_operands = evaluate_operands(J_external_operators, entity_maps=entity_maps, function_space=V)
         _ = evaluate_external_operators(J_external_operators, evaluated_operands)
+
+        J_compiled = dolfinx.fem.form(J_replaced, entity_maps=entity_maps)
 
         Jh = dolfinx.fem.assemble_scalar(J_compiled)
         Jh = mesh.comm.allreduce(Jh, op=MPI.SUM)
